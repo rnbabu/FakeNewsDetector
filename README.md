@@ -31,6 +31,8 @@ pip install -r requirements.txt
 
 get tavily API key from  https://app.tavily.com/ and past it in .env file
 
+- if you want to use local model download Ollama and pull the required models like llama3.2:3b, llama3.1:8b..etc, the code is Ollama ready
+
 - Change the model info as required in fact_check_agent.py
 
 Run the app:
