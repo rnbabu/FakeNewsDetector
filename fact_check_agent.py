@@ -13,6 +13,17 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 if not TAVILY_API_KEY:
     raise ValueError("Please set TAVILY_API_KEY in .env file")
  
+
+st.markdown("""
+    <style>
+        button[title="Stop"] {
+            display: none;
+        }
+        button[title="Deploy"] {
+            display: none;
+        }
+    </style>
+""", unsafe_allow_html=True)
 st.set_page_config(page_title="🕵️ Fake News Detector", layout="centered", page_icon="🔍")
  
 # ===================== SIDEBAR =====================
@@ -26,7 +37,8 @@ with st.sidebar:
         "Model (smaller = faster)",
         ["llama3.2:3b", "gemma2:2b", "phi3:3.8b", "llama3.1:8b"],
         index=0,
-        key="model_selector"
+        key="model_selector",
+        help="Choose the model for analysis. Smaller models are faster but may be less accurate."
     )
     
     if model_name != st.session_state.selected_model:
@@ -35,14 +47,15 @@ with st.sidebar:
             del st.session_state.agent
         st.rerun()
     
-    max_results = st.slider("Search Results", 3, 8, 4)
+    max_results = st.slider("Search Results", 3, 8, 4, help="Number of search results returned from Tavily for fact checking. Lesser the number faster the response")
     
     if st.button("🗑️ Clear Chat"):
         st.session_state.messages = []
         st.rerun()
  
 # ===================== MAIN UI =====================
-st.title("🕵️ Fake News Detective (LangGraph)")
+st.set_page_config(page_title="Fake News Detector", page_icon="")
+st.title("🕵️ Fake News Detector")
 st.caption(f"Current Model: **{st.session_state.selected_model}**")
  
 if "messages" not in st.session_state:
@@ -68,13 +81,17 @@ def get_agent(model_name: str):
         include_answer=True
     )
     
-    system_prompt = """You are a quick, impartial fake news detector.
+    system_prompt = """
+You are a quick, impartial fake news detector.
 Use the Tavily search tool to gather evidence.
 Be objective and evidence-based.
-Always structure your final response with:
-- **Verdict**: REAL / FAKE / MISLEADING / UNVERIFIED
-- /n**Explanation**: Brief reasoning with key facts
-- /n**Sources**: List important sources/links"""
+Always format your final response EXACTLY like this:
+Verdict: REAL / FAKE / MISLEADING / UNVERIFIED
+Explanation:
+- concise reasoning
+Sources:
+- source links
+"""
  
     # Modern LangGraph create_react_agent (no state_modifier)
     agent = create_react_agent(
@@ -95,15 +112,17 @@ agent = st.session_state.agent
 # ===================== CHAT INPUT =====================
 if user_input := st.chat_input("Paste news claim here..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
+
     with st.chat_message("user"):
         st.markdown(user_input)
-    
+
     with st.chat_message("assistant"):
         start_time = time.time()
+
         with st.spinner(f"Analyzing with {st.session_state.selected_model}..."):
             try:
                 response = agent.invoke({"messages": [HumanMessage(content=user_input)]})
-                
+
                 # Safe extraction from LangGraph response
                 messages = response.get("messages", [])
                 if messages:
@@ -111,11 +130,45 @@ if user_input := st.chat_input("Paste news claim here..."):
                     answer = getattr(final_msg, "content", str(final_msg))
                 else:
                     answer = str(response)
-                
-                st.markdown(answer)
+
+                # ===================== FORMAT VERDICT =====================
+                verdict_styles = {
+                    "REAL": ("✅", "green"),
+                    "FAKE": ("❌", "red"),
+                    "MISLEADING": ("⚠️", "orange"),
+                    "UNVERIFIED": ("❓", "gray")
+                }
+
+                formatted_answer = answer
+
+                if "Verdict:" in answer:
+                    verdict = answer.split("Verdict:")[1].split("\n")[0].strip().upper()
+                    icon, color = verdict_styles.get(verdict, ("ℹ️", "blue"))
+
+                    formatted_answer = formatted_answer.replace(
+                        f"Verdict: {verdict}",
+                        f"<b>Verdict:</b> <b style='color:{color}; font-size:20px'>{icon} {verdict}</b>"
+                    )
+
+                formatted_answer = formatted_answer.replace(
+                    "Explanation:",
+                    "<br><br><b>Explanation:</b>"
+                )
+
+                formatted_answer = formatted_answer.replace(
+                    "Sources:",
+                    "<br><br><b>Sources:</b>"
+                )
+
+                st.markdown(formatted_answer, unsafe_allow_html=True)
+
                 st.caption(f"⏱️ Took {time.time() - start_time:.1f} seconds")
-                st.session_state.messages.append({"role": "assistant", "content": answer})
-                
+
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": formatted_answer
+                })
+
             except Exception as e:
                 error_msg = f"⚠️ Error: {str(e)}"
                 st.error(error_msg)
